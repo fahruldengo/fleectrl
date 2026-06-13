@@ -13,6 +13,7 @@ const MENUS = [
     { id: 'dashboard',  label: 'Dashboard',        ic: '▤', href: 'dashboard.html',  roles: ['Admin','Manager','GA'] },
     { id: 'trips',      label: 'Mobil Keluar',     ic: '⛢', href: 'trips.html',      roles: ['Admin','Manager','GA','Driver','Karyawan'] },
     { id: 'fuel',       label: 'Bensin & Klaim',   ic: '⛽', href: 'fuel.html',       roles: ['Admin','Manager','GA','Driver'] },
+    { id: 'inspection', label: 'Kontrol Kendaraan',ic: '☑', href: 'inspection.html', roles: ['Admin','Manager','GA','Driver'] },
     { id: 'schedule',   label: 'Jadwal Driver',    ic: '◷', href: 'schedule.html',   roles: ['Admin','Manager','GA','Driver'] },
   ]},
   { group: 'Master Data', items: [
