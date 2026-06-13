@@ -6,6 +6,12 @@ const Session = {
   get() { try { return JSON.parse(sessionStorage.getItem(this.KEY)); } catch { return null; } },
   set(u) { sessionStorage.setItem(this.KEY, JSON.stringify(u)); },
   clear() { sessionStorage.removeItem(this.KEY); },
+  /** Halaman pertama yang boleh diakses user sesuai role-nya. */
+  landingPage(roleOverride) {
+    const role = roleOverride || (this.get() && this.get().role);
+    const first = MENUS.flatMap(g => g.items).find(i => i.roles.includes(role));
+    return first ? first.href : 'index.html';
+  },
   /** Panggil di tiap halaman terproteksi. Redirect ke login jika tak ada / tak berhak. */
   guard(pageId) {
     const u = this.get();
@@ -13,8 +19,7 @@ const Session = {
     if (pageId) {
       const allowed = MENUS.flatMap(g => g.items).find(i => i.id === pageId);
       if (allowed && !allowed.roles.includes(u.role)) {
-        alert('Anda tidak memiliki akses ke halaman ini.');
-        location.href = 'dashboard.html';
+        location.href = this.landingPage();
         return null;
       }
     }
