@@ -3,7 +3,7 @@
    GANTI API_URL dengan URL deployment Apps Script (.../exec)
    ============================================================ */
 const CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/GANTI_DEPLOYMENT_ID/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbzfcgSQF84-z160xpIw-V8gnGixIJ-12gRdpUR1usIEh1tkjdAeFmNwxwh2XiqWH6bP/exec',
   APP_NAME: 'FleetCtrl',
 };
 
