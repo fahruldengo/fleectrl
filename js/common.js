@@ -117,7 +117,7 @@ const UI = {
     const m = {
       'Tersedia':'b-green','Digunakan':'b-blue','Servis':'b-amber','Rusak':'b-red',
       'Menunggu Approval':'b-amber','Disetujui':'b-green','Berjalan':'b-blue','Selesai':'b-gray','Ditolak':'b-red',
-      'Aktif':'b-green','Nonaktif':'b-gray','Pending':'b-amber','Approved':'b-green','Rejected':'b-red'
+      'Aktif':'b-green','Nonaktif':'b-gray','Pending':'b-amber','Approved':'b-green','Rejected':'b-red','Dibatalkan':'b-gray'
     };
     return `<span class="badge ${m[s]||'b-gray'}">${s||'-'}</span>`;
   },
