@@ -7,8 +7,9 @@
             -> Selesai    (pemohon/driver isi KM Kembali; selisih otomatis,
                            KM mobil diperbarui, baris KM_LOG ditulis)
    Hak akses:
-   - Karyawan/Driver: ajukan permohonan + isi KM keluar & KM kembali, lihat miliknya
-   - Manager/GA/Admin: approve/reject + boleh juga isi KM kembali
+   - Karyawan/Driver: ajukan permohonan + isi KM keluar (saat ajukan) & KM kembali (saat tiba), lihat miliknya
+   - Manager/GA/Admin: approve/reject. TIDAK mengisi KM kembali — yang tahu
+     odometer saat mobil tiba hanyalah driver/pemohon di lapangan.
    ============================================================ */
 const user = Session.guard('trips');
 const content = UI.shell('trips', 'Kontrol Mobil Keluar');
@@ -61,9 +62,10 @@ function actions(t) {
     b += `<button class="btn btn-primary btn-sm" onclick="decide('${t.TripID}','Disetujui')">Setujui</button>
           <button class="btn btn-danger btn-sm" onclick="decide('${t.TripID}','Ditolak')">Tolak</button>`;
   }
-  // KM kembali bisa diisi oleh petugas gate ATAU oleh pemohon/driver yang bersangkutan
+  // KM kembali HANYA diisi oleh driver/pemohon yang bersangkutan —
+  // Admin/GA tidak berada di lapangan, jadi tidak tahu odometer saat mobil tiba.
   const isOwner = (t.Pemohon === user.name || t.NamaDriver === user.name);
-  if (t.Status === 'Berjalan' && (canApprove || isOwner)) {
+  if (t.Status === 'Berjalan' && isOwner) {
     b += `<button class="btn btn-primary btn-sm" onclick="checkIn('${t.TripID}')">◂ Isi KM Kembali</button>`;
   }
   return b || '<span style="color:var(--muted);font-size:12px">—</span>';
