@@ -7,15 +7,15 @@ const content = UI.shell('dashboard', 'Dashboard Operasional');
 (async function init() {
   UI.spinner(content);
   try {
-    const [d, rem] = await Promise.all([API.dashboard(), API.reminders(30)]);
+    const [d, rem, t] = await Promise.all([API.dashboard(), API.reminders(30), API.list('TRIPS')]);
     if (!d.ok) throw new Error(d.error);
-    render(d.data, rem.ok ? rem.data : []);
+    render(d.data, rem.ok ? rem.data : [], t.ok ? t.data : []);
   } catch (e) {
     UI.empty(content, 'Gagal memuat dashboard: ' + e.message, '⚠');
   }
 })();
 
-function render(d, reminders) {
+function render(d, reminders, allTrips) {
   const sc = d.statusCount;
   const crit = reminders.filter(r => (r.sisaHari!=null && r.sisaHari <= 7) || (r.sisaKM!=null && r.sisaKM <= 0));
 
@@ -60,6 +60,12 @@ function render(d, reminders) {
     <div class="card" style="margin-top:16px">
       <h3>⛽ Efisiensi BBM per Kendaraan (KM / Liter)</h3>
       <div id="effBox"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3 style="justify-content:space-between"><span>▦ Penggunaan per Mobil (30 hari terakhir)</span>
+        <a href="history.html" style="font-size:12px;font-weight:600">Lihat riwayat lengkap →</a></h3>
+      <div id="usageBox"></div>
     </div>`;
 
   // Reminders
@@ -96,6 +102,37 @@ function render(d, reminders) {
           <div style="width:${(e.kmPerLiter/max*100).toFixed(0)}%;height:100%;background:linear-gradient(90deg,var(--gauge),#22c55e);border-radius:99px;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;color:#fff;font-size:11px;font-weight:700">${e.kmPerLiter}</div>
         </div>
         <div style="width:70px;text-align:right;font-size:12px;color:var(--muted)">km/L</div>
+      </div>`).join('');
+  }
+
+  // Penggunaan per mobil — 30 hari terakhir, dari trip Selesai
+  const usageBox = document.getElementById('usageBox');
+  const since = new Date(); since.setDate(since.getDate() - 30);
+  const done = (allTrips||[]).filter(t => {
+    if (t.Status !== 'Selesai') return false;
+    const dt = new Date(t.JamKembali || t.TanggalRencana);
+    return !isNaN(dt) && dt >= since;
+  });
+  if (!done.length) {
+    UI.empty(usageBox, 'Belum ada perjalanan selesai dalam 30 hari terakhir.', '▦');
+  } else {
+    const map = {};
+    done.forEach(t => {
+      const k = t.PlatNomor;
+      if (!map[k]) map[k] = { plat:k, km:0, trips:0, drivers:new Set() };
+      map[k].km += Number(t.SelisihKM)||0;
+      map[k].trips++;
+      if (t.NamaDriver||t.Pemohon) map[k].drivers.add(t.NamaDriver||t.Pemohon);
+    });
+    const rows = Object.values(map).sort((a,b)=>b.km-a.km);
+    const maxKm = Math.max(...rows.map(r=>r.km), 1);
+    usageBox.innerHTML = rows.slice(0,6).map(r => `
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <div style="width:110px;font-weight:700;font-family:var(--mono)">${r.plat}</div>
+        <div style="flex:1;background:#F1F5F9;border-radius:99px;height:22px;overflow:hidden">
+          <div style="width:${(r.km/maxKm*100).toFixed(0)}%;height:100%;background:linear-gradient(90deg,var(--sea),#3b82f6);border-radius:99px;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;color:#fff;font-size:11px;font-weight:700">${UI.num(r.km)} km</div>
+        </div>
+        <div style="width:120px;text-align:right;font-size:12px;color:var(--muted)">${r.trips} trip · ${r.drivers.size} driver</div>
       </div>`).join('');
   }
 }
