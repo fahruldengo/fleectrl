@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FleetCtrl — Masuk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="brand">
+      <div class="logo">F</div>
+      <div><b>FleetCtrl</b><small>Kontrol Armada Kantor</small></div>
+    </div>
+    <p class="tag">Masuk untuk mengelola armada & driver</p>
+    <div class="field">
+      <label>Username</label>
+      <input id="username" placeholder="cth: admin" autocomplete="username">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input id="password" type="password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" id="loginBtn" style="width:100%;justify-content:center;margin-top:6px">Masuk</button>
+    <div class="demo">
+      <b>Akun demo (setelah <code>setupSheets()</code>):</b><br>
+      admin / admin123 · ga / ga123 · manager / mgr123<br>
+      budi / drv123 · karyawan / kry123
+    </div>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/api.js"></script>
+<script src="js/common.js"></script>
+<script>
+  if (Session.get()) location.href = 'dashboard.html';
+
+  const btn = document.getElementById('loginBtn');
+  async function doLogin() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    if (!username || !password) return UI.toast('Isi username & password.', 'err');
+    btn.disabled = true; btn.textContent = 'Memeriksa…';
+    try {
+      const r = await API.login(username, password);
+      if (r.ok) {
+        Session.set(r.user);
+        location.href = 'dashboard.html';
+      } else {
+        UI.toast(r.error || 'Login gagal.', 'err');
+        btn.disabled = false; btn.textContent = 'Masuk';
+      }
+    } catch (e) {
+      UI.toast('Tidak bisa terhubung ke server. Periksa API_URL.', 'err');
+      btn.disabled = false; btn.textContent = 'Masuk';
+    }
+  }
+  btn.onclick = doLogin;
+  document.getElementById('password').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
+</script>
+</body>
+</html>
