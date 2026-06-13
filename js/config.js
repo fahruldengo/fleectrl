@@ -16,6 +16,9 @@ const MENUS = [
     { id: 'inspection', label: 'Kontrol Kendaraan',ic: '☑', href: 'inspection.html', roles: ['Admin','Manager','GA','Driver'] },
     { id: 'schedule',   label: 'Jadwal Driver',    ic: '◷', href: 'schedule.html',   roles: ['Admin','Manager','GA','Driver'] },
   ]},
+  { group: 'Laporan', items: [
+    { id: 'history',    label: 'Riwayat Penggunaan',ic: '▦', href: 'history.html',    roles: ['Admin','Manager','GA'] },
+  ]},
   { group: 'Master Data', items: [
     { id: 'cars',       label: 'Data Mobil',       ic: '⛟', href: 'cars.html',       roles: ['Admin','GA'] },
     { id: 'drivers',    label: 'Data Driver',      ic: '☺', href: 'drivers.html',    roles: ['Admin','GA'] },
