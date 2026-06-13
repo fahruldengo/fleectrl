@@ -5,6 +5,7 @@
    ============================================================ */
 const user = Session.guard('maintenance');
 const content = UI.shell('maintenance', 'Servis Berkala & Riwayat KM');
+const canManage = ['Admin','GA','Manager'].includes(user.role);
 let maint = [], cars = [], kmlog = [];
 
 content.innerHTML = `
@@ -61,38 +62,80 @@ function renderList(q) {
     { key:'JenisServis', label:'Jenis Servis' },
     { key:'Bengkel', label:'Bengkel' },
     { key:'Biaya', label:'Biaya', render:v=>UI.rupiah(v) },
+    { key:'Status', label:'Status', render:v=> v==='Dibatalkan'? UI.statusBadge('Dibatalkan') : '<span class="badge b-green">Tercatat</span>' },
+    { key:'_act', label:'Aksi', render:(_,r)=> maintActions(r) },
   ]);
 }
 
-function addMaint() {
+function maintActions(r) {
+  if (r.Status === 'Dibatalkan') return '<span style="color:var(--muted);font-size:12px">Dibatalkan</span>';
+  if (!canManage) return '<span style="color:var(--muted);font-size:12px">—</span>';
+  return `<button class="btn btn-ghost btn-sm" onclick="editMaint('${r.MaintID}')">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="cancelMaint('${r.MaintID}')">Hapus</button>`;
+}
+
+function addMaint(existing) {
+  const ed = existing || null;
   const body = `
-    <div class="field"><label>Mobil</label><select id="f_plat" onchange="fillKm()">${cars.map(c=>`<option value="${c.PlatNomor}" data-km="${c.KMTerakhir||0}">${c.PlatNomor} — ${c.Merek} ${c.Tipe}</option>`).join('')}</select></div>
+    <div class="field"><label>Mobil</label><select id="f_plat" onchange="fillKm()">${cars.map(c=>`<option value="${c.PlatNomor}" data-km="${c.KMTerakhir||0}" ${ed&&ed.PlatNomor===c.PlatNomor?'selected':''}>${c.PlatNomor} — ${c.Merek} ${c.Tipe}</option>`).join('')}</select></div>
     <div class="row">
-      <div class="field"><label>Tanggal</label><input id="f_tgl" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
-      <div class="field"><label>KM Saat Servis</label><input id="f_km" type="number"></div>
+      <div class="field"><label>Tanggal</label><input id="f_tgl" type="date" value="${ed?(ed.Tanggal? new Date(ed.Tanggal).toISOString().slice(0,10):''):new Date().toISOString().slice(0,10)}"></div>
+      <div class="field"><label>KM Saat Servis</label><input id="f_km" type="number" value="${ed?ed.KMSaatServis:''}"></div>
     </div>
-    <div class="field"><label>Jenis Servis</label><input id="f_jenis" placeholder="cth: Ganti oli + filter"></div>
+    <div class="field"><label>Jenis Servis</label><input id="f_jenis" value="${ed?(ed.JenisServis||''):''}" placeholder="cth: Ganti oli + filter"></div>
     <div class="row">
-      <div class="field"><label>Bengkel</label><input id="f_bengkel"></div>
-      <div class="field"><label>Biaya (Rp)</label><input id="f_biaya" type="number"></div>
+      <div class="field"><label>Bengkel</label><input id="f_bengkel" value="${ed?(ed.Bengkel||''):''}"></div>
+      <div class="field"><label>Biaya (Rp)</label><input id="f_biaya" type="number" value="${ed?ed.Biaya:''}"></div>
     </div>
-    <div class="field"><label>Catatan</label><textarea id="f_cat" rows="2"></textarea></div>`;
-  UI.modal({ title:'Catat Servis', bodyHtml: body, onOk: async () => {
+    <div class="field"><label>Catatan</label><textarea id="f_cat" rows="2">${ed?(ed.Catatan||''):''}</textarea></div>`;
+  UI.modal({ title: ed?'Edit Servis':'Catat Servis', okLabel: ed?'Simpan Perubahan':'Simpan', bodyHtml: body, onOk: async () => {
     const plat = f_plat.value, km = Number(f_km.value)||0;
     if (!km) throw 'KM saat servis wajib diisi.';
-    const r = await API.insert('MAINTENANCE', {
+    const data = {
       PlatNomor:plat, Tanggal:f_tgl.value, KMSaatServis:km, JenisServis:f_jenis.value,
       Biaya:Number(f_biaya.value)||0, Bengkel:f_bengkel.value, Catatan:f_cat.value
-    }, 'MaintID', 'MNT');
-    if (!r.ok) throw r.error;
-    // reset titik servis berkala mobil + status kembali tersedia
-    await API.update('CARS','PlatNomor',plat,{ KMServisTerakhir:km, Status:'Tersedia' });
-    UI.closeModal(); UI.toast('Servis tercatat, pengingat di-reset.'); load();
+    };
+    if (ed) {
+      const r = await API.update('MAINTENANCE','MaintID',ed.MaintID,data);
+      if (!r.ok) throw r.error;
+      // perbarui titik servis mobil bila KM berubah
+      await API.update('CARS','PlatNomor',plat,{ KMServisTerakhir:km });
+      UI.closeModal(); UI.toast('Perubahan servis disimpan.'); load();
+    } else {
+      data.Status = 'Tercatat';
+      const r = await API.insert('MAINTENANCE', data, 'MaintID', 'MNT');
+      if (!r.ok) throw r.error;
+      // reset titik servis berkala mobil + status kembali tersedia
+      await API.update('CARS','PlatNomor',plat,{ KMServisTerakhir:km, Status:'Tersedia' });
+      UI.closeModal(); UI.toast('Servis tercatat, pengingat di-reset.'); load();
+    }
   }});
   setTimeout(fillKm, 50);
 }
+
+function editMaint(id) {
+  if (!canManage) return UI.toast('Anda tidak berhak mengedit.', 'err');
+  const r = maint.find(x=>x.MaintID===id);
+  if (r) addMaint(r);
+}
+
+function cancelMaint(id) {
+  if (!canManage) return UI.toast('Anda tidak berhak menghapus.', 'err');
+  const r = maint.find(x=>x.MaintID===id);
+  UI.modal({ title:'Hapus Data Servis', okLabel:'Ya, Hapus', okClass:'btn-danger',
+    bodyHtml: `<p style="color:var(--ink-2)">Data servis <b>${r.PlatNomor}</b> (${UI.date(r.Tanggal)}) akan ditandai <b>Dibatalkan</b>.</p>
+      <div class="rem warn" style="margin-top:12px"><span class="badge b-amber">Catatan</span>Data tetap tersimpan di Sheet untuk audit.</div>`,
+    onOk: async () => {
+      const res = await API.cancel('MAINTENANCE','MaintID',id,user.name);
+      if (!res.ok) throw res.error;
+      UI.closeModal(); UI.toast('Data servis ditandai dibatalkan.'); load();
+    }});
+}
+
 function fillKm() {
   const sel = document.getElementById('f_plat');
   const km = sel.options[sel.selectedIndex].dataset.km;
-  document.getElementById('f_km').value = km;
+  // saat edit, jangan timpa KM yang sudah diisi
+  const kmField = document.getElementById('f_km');
+  if (!kmField.value) kmField.value = km;
 }
