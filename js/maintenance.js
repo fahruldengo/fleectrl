@@ -54,12 +54,16 @@ function renderSvc() {
 
 function renderList(q) {
   q = (q||'').toLowerCase();
-  const rows = maint.filter(m => [m.PlatNomor,m.Bengkel,m.JenisServis].join(' ').toLowerCase().includes(q)).reverse();
+  const rows = maint.filter(m => [m.PlatNomor,m.Bengkel,m.JenisServis,m.Kategori].join(' ').toLowerCase().includes(q)).reverse();
   document.getElementById('list').innerHTML = UI.table(rows, [
     { key:'Tanggal', label:'Tanggal', render:v=>UI.date(v) },
     { key:'PlatNomor', label:'Mobil', render:v=>`<b style="font-family:var(--mono)">${v}</b>` },
-    { key:'KMSaatServis', label:'KM', render:v=>UI.num(v) },
-    { key:'JenisServis', label:'Jenis Servis' },
+    { key:'Kategori', label:'Kategori', render:(v,r)=>{
+        const k = v || (r.KMSaatServis ? 'Penggantian Oli' : 'Maintenance');
+        return k==='Penggantian Oli' ? '<span class="badge b-blue">Penggantian Oli</span>' : '<span class="badge b-gray">Maintenance</span>';
+      }},
+    { key:'KMSaatServis', label:'KM', render:v=> v? UI.num(v) : '<span style="color:var(--muted)">—</span>' },
+    { key:'JenisServis', label:'Detail' },
     { key:'Bengkel', label:'Bengkel' },
     { key:'Biaya', label:'Biaya', render:v=>UI.rupiah(v) },
     { key:'Status', label:'Status', render:v=> v==='Dibatalkan'? UI.statusBadge('Dibatalkan') : '<span class="badge b-green">Tercatat</span>' },
@@ -76,41 +80,80 @@ function maintActions(r) {
 
 function addMaint(existing) {
   const ed = existing || null;
+  const kat = ed ? (ed.Kategori || (ed.KMSaatServis ? 'Penggantian Oli' : 'Maintenance')) : 'Penggantian Oli';
   const body = `
     <div class="field"><label>Mobil</label><select id="f_plat" onchange="fillKm()">${cars.map(c=>`<option value="${c.PlatNomor}" data-km="${c.KMTerakhir||0}" ${ed&&ed.PlatNomor===c.PlatNomor?'selected':''}>${c.PlatNomor} — ${c.Merek} ${c.Tipe}</option>`).join('')}</select></div>
     <div class="row">
+      <div class="field"><label>Kategori</label>
+        <select id="f_kat" onchange="onKatChange()">
+          <option value="Penggantian Oli" ${kat==='Penggantian Oli'?'selected':''}>Penggantian Oli</option>
+          <option value="Maintenance" ${kat==='Maintenance'?'selected':''}>Maintenance</option>
+        </select>
+      </div>
       <div class="field"><label>Tanggal</label><input id="f_tgl" type="date" value="${ed?(ed.Tanggal? new Date(ed.Tanggal).toISOString().slice(0,10):''):new Date().toISOString().slice(0,10)}"></div>
-      <div class="field"><label>KM Saat Servis</label><input id="f_km" type="number" value="${ed?ed.KMSaatServis:''}"></div>
     </div>
-    <div class="field"><label>Jenis Servis</label><input id="f_jenis" value="${ed?(ed.JenisServis||''):''}" placeholder="cth: Ganti oli + filter"></div>
+    <div class="field"><label>KM Saat Servis <span id="kmReq" style="color:var(--alert)">*</span></label>
+      <input id="f_km" type="number" value="${ed?(ed.KMSaatServis||''):''}">
+      <div class="hint" id="kmHint">Untuk penggantian oli, KM wajib diisi dan akan me-reset pengingat servis berkala.</div>
+    </div>
+    <div class="field"><label>Detail Servis</label><input id="f_jenis" value="${ed?(ed.JenisServis||''):''}" placeholder="cth: Ganti oli mesin + filter"></div>
     <div class="row">
       <div class="field"><label>Bengkel</label><input id="f_bengkel" value="${ed?(ed.Bengkel||''):''}"></div>
       <div class="field"><label>Biaya (Rp)</label><input id="f_biaya" type="number" value="${ed?ed.Biaya:''}"></div>
     </div>
     <div class="field"><label>Catatan</label><textarea id="f_cat" rows="2">${ed?(ed.Catatan||''):''}</textarea></div>`;
   UI.modal({ title: ed?'Edit Servis':'Catat Servis', okLabel: ed?'Simpan Perubahan':'Simpan', bodyHtml: body, onOk: async () => {
-    const plat = f_plat.value, km = Number(f_km.value)||0;
-    if (!km) throw 'KM saat servis wajib diisi.';
+    const plat = f_plat.value;
+    const kategori = f_kat.value;
+    const isOli = kategori === 'Penggantian Oli';
+    const km = Number(f_km.value)||0;
+    if (isOli && !km) throw 'Untuk penggantian oli, KM saat servis wajib diisi.';
     const data = {
-      PlatNomor:plat, Tanggal:f_tgl.value, KMSaatServis:km, JenisServis:f_jenis.value,
-      Biaya:Number(f_biaya.value)||0, Bengkel:f_bengkel.value, Catatan:f_cat.value
+      PlatNomor:plat, Tanggal:f_tgl.value, Kategori:kategori,
+      KMSaatServis: isOli ? km : '',
+      JenisServis:f_jenis.value, Biaya:Number(f_biaya.value)||0,
+      Bengkel:f_bengkel.value, Catatan:f_cat.value
     };
     if (ed) {
       const r = await API.update('MAINTENANCE','MaintID',ed.MaintID,data);
       if (!r.ok) throw r.error;
-      // perbarui titik servis mobil bila KM berubah
-      await API.update('CARS','PlatNomor',plat,{ KMServisTerakhir:km });
+      // hanya penggantian oli yang memperbarui titik servis mobil
+      if (isOli && km) await API.update('CARS','PlatNomor',plat,{ KMServisTerakhir:km });
       UI.closeModal(); UI.toast('Perubahan servis disimpan.'); load();
     } else {
       data.Status = 'Tercatat';
       const r = await API.insert('MAINTENANCE', data, 'MaintID', 'MNT');
       if (!r.ok) throw r.error;
-      // reset titik servis berkala mobil + status kembali tersedia
-      await API.update('CARS','PlatNomor',plat,{ KMServisTerakhir:km, Status:'Tersedia' });
-      UI.closeModal(); UI.toast('Servis tercatat, pengingat di-reset.'); load();
+      if (isOli && km) {
+        // reset pengingat servis berkala + mobil kembali tersedia
+        await API.update('CARS','PlatNomor',plat,{ KMServisTerakhir:km, Status:'Tersedia' });
+        UI.closeModal(); UI.toast('Penggantian oli tercatat, pengingat di-reset.'); load();
+      } else {
+        await API.update('CARS','PlatNomor',plat,{ Status:'Tersedia' });
+        UI.closeModal(); UI.toast('Maintenance tercatat.'); load();
+      }
     }
   }});
-  setTimeout(fillKm, 50);
+  setTimeout(()=>{ onKatChange(); fillKm(); }, 50);
+}
+
+/** Aktif/nonaktifkan kolom KM sesuai kategori. */
+function onKatChange() {
+  const isOli = document.getElementById('f_kat').value === 'Penggantian Oli';
+  const km = document.getElementById('f_km');
+  const req = document.getElementById('kmReq');
+  const hint = document.getElementById('kmHint');
+  km.disabled = !isOli;
+  req.style.display = isOli ? 'inline' : 'none';
+  if (isOli) {
+    km.style.background = '';
+    hint.textContent = 'Untuk penggantian oli, KM wajib diisi dan akan me-reset pengingat servis berkala.';
+    if (!km.value) fillKm();
+  } else {
+    km.value = '';
+    km.style.background = '#F1F5F9';
+    hint.textContent = 'Maintenance tidak memerlukan KM — kolom dinonaktifkan dan pengingat servis tidak berubah.';
+  }
 }
 
 function editMaint(id) {
@@ -133,9 +176,10 @@ function cancelMaint(id) {
 }
 
 function fillKm() {
+  const katSel = document.getElementById('f_kat');
+  if (katSel && katSel.value !== 'Penggantian Oli') return; // KM nonaktif untuk Maintenance
   const sel = document.getElementById('f_plat');
   const km = sel.options[sel.selectedIndex].dataset.km;
-  // saat edit, jangan timpa KM yang sudah diisi
   const kmField = document.getElementById('f_km');
-  if (!kmField.value) kmField.value = km;
+  if (!kmField.value) kmField.value = km; // jangan timpa nilai yang sudah ada
 }
