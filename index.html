@@ -37,7 +37,7 @@
 <script src="js/api.js"></script>
 <script src="js/common.js"></script>
 <script>
-  if (Session.get()) location.href = 'dashboard.html';
+  if (Session.get()) location.href = Session.landingPage();
 
   const btn = document.getElementById('loginBtn');
   async function doLogin() {
@@ -49,7 +49,7 @@
       const r = await API.login(username, password);
       if (r.ok) {
         Session.set(r.user);
-        location.href = 'dashboard.html';
+        location.href = Session.landingPage(r.user.role);
       } else {
         UI.toast(r.error || 'Login gagal.', 'err');
         btn.disabled = false; btn.textContent = 'Masuk';
