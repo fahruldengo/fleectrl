@@ -1,11 +1,14 @@
 /* ============================================================
    FLEETCTRL — Mobil Keluar (Gate Control)
-   Alur status: Menunggu Approval -> Disetujui/Ditolak
-                -> Berjalan (check-out, KM keluar)
-                -> Selesai (check-in, KM kembali, selisih)
+   Alur status:
+     Menunggu Approval  (pemohon ajukan + isi KM Keluar)
+       -> Ditolak
+       -> Berjalan       (disetujui; mobil otomatis "Digunakan")
+            -> Selesai    (pemohon/driver isi KM Kembali; selisih otomatis,
+                           KM mobil diperbarui, baris KM_LOG ditulis)
    Hak akses:
-   - Karyawan/Driver: ajukan permohonan, lihat miliknya
-   - Manager/GA/Admin: approve/reject, check-out, check-in
+   - Karyawan/Driver: ajukan permohonan + isi KM keluar & KM kembali, lihat miliknya
+   - Manager/GA/Admin: approve/reject + boleh juga isi KM kembali
    ============================================================ */
 const user = Session.guard('trips');
 const content = UI.shell('trips', 'Kontrol Mobil Keluar');
@@ -58,11 +61,10 @@ function actions(t) {
     b += `<button class="btn btn-primary btn-sm" onclick="decide('${t.TripID}','Disetujui')">Setujui</button>
           <button class="btn btn-danger btn-sm" onclick="decide('${t.TripID}','Ditolak')">Tolak</button>`;
   }
-  if (canApprove && t.Status === 'Disetujui') {
-    b += `<button class="btn btn-primary btn-sm" onclick="checkOut('${t.TripID}')">Mobil Keluar ▸</button>`;
-  }
-  if (canApprove && t.Status === 'Berjalan') {
-    b += `<button class="btn btn-primary btn-sm" onclick="checkIn('${t.TripID}')">◂ Mobil Kembali</button>`;
+  // KM kembali bisa diisi oleh petugas gate ATAU oleh pemohon/driver yang bersangkutan
+  const isOwner = (t.Pemohon === user.name || t.NamaDriver === user.name);
+  if (t.Status === 'Berjalan' && (canApprove || isOwner)) {
+    b += `<button class="btn btn-primary btn-sm" onclick="checkIn('${t.TripID}')">◂ Isi KM Kembali</button>`;
   }
   return b || '<span style="color:var(--muted);font-size:12px">—</span>';
 }
@@ -71,9 +73,10 @@ function actions(t) {
 function requestTrip() {
   const availCars = cars.filter(c => c.Status === 'Tersedia');
   const availDrivers = drivers.filter(d => d.Status === 'Aktif');
+  const firstKm = availCars.length ? (Number(availCars[0].KMTerakhir)||0) : 0;
   const body = `
     <div class="field"><label>Mobil</label>
-      <select id="f_plat">${availCars.length? availCars.map(c=>`<option value="${c.PlatNomor}">${c.PlatNomor} — ${c.Merek} ${c.Tipe}</option>`).join('') : '<option value="">(tidak ada mobil tersedia)</option>'}</select>
+      <select id="f_plat" onchange="syncKm()">${availCars.length? availCars.map(c=>`<option value="${c.PlatNomor}" data-km="${Number(c.KMTerakhir)||0}">${c.PlatNomor} — ${c.Merek} ${c.Tipe}</option>`).join('') : '<option value="">(tidak ada mobil tersedia)</option>'}</select>
     </div>
     <div class="field"><label>Driver</label>
       <select id="f_driver"><option value="">— Tanpa driver / setir sendiri —</option>${availDrivers.map(d=>`<option value="${d.DriverID}|${d.Nama}">${d.Nama}</option>`).join('')}</select>
@@ -83,16 +86,19 @@ function requestTrip() {
     <div class="row">
       <div class="field"><label>Tanggal Rencana</label><input id="f_tgl" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
       <div class="field"><label>Penumpang (opsional)</label><input id="f_pnp" placeholder="Nama penumpang"></div>
-    </div>`;
+    </div>
+    <div class="field"><label>KM Keluar (odometer saat berangkat)</label><input id="f_km" type="number" value="${firstKm}"><div class="hint">Catat angka odometer mobil sekarang. KM kembali diisi setelah perjalanan selesai.</div></div>`;
   UI.modal({ title:'Permohonan Peminjaman Mobil', okLabel:'Kirim Permohonan', bodyHtml: body, onOk: async () => {
     if (!f_plat.value) throw 'Tidak ada mobil tersedia.';
     if (!f_tujuan.value.trim()) throw 'Tujuan wajib diisi.';
+    const kmOut = Number(f_km.value)||0;
+    if (!kmOut) throw 'KM keluar wajib diisi.';
     const [did, dname] = (f_driver.value||'|').split('|');
     const rec = {
       PlatNomor:f_plat.value, DriverID:did||'', NamaDriver:dname||'', Pemohon:user.name,
       Penumpang:f_pnp.value, Tujuan:f_tujuan.value.trim(), Keperluan:f_perlu.value,
       TanggalRencana:f_tgl.value, Status:'Menunggu Approval',
-      JamKeluar:'', KMKeluar:'', JamKembali:'', KMKembali:'', SelisihKM:'', ApprovedBy:'', Catatan:''
+      JamKeluar:nowLocal(), KMKeluar:kmOut, JamKembali:'', KMKembali:'', SelisihKM:'', ApprovedBy:'', Catatan:''
     };
     const r = await API.insert('TRIPS', rec, 'TripID', 'TRP');
     if (!r.ok) throw r.error;
@@ -100,46 +106,40 @@ function requestTrip() {
   }});
 }
 
-/* ---------- Approval ---------- */
-async function decide(id, status) {
-  const patch = { Status: status, ApprovedBy: user.name };
-  const r = await API.update('TRIPS','TripID',id,patch);
-  if (!r.ok) return UI.toast(r.error,'err');
-  UI.toast(status==='Disetujui'?'Permohonan disetujui.':'Permohonan ditolak.');
-  load();
+function syncKm() {
+  const sel = document.getElementById('f_plat');
+  const km = sel.options[sel.selectedIndex]?.dataset.km || 0;
+  document.getElementById('f_km').value = km;
 }
 
-/* ---------- Check-out (gate keluar) ---------- */
-function checkOut(id) {
+/* ---------- Approval ---------- */
+async function decide(id, status) {
   const t = trips.find(x=>x.TripID===id);
-  const car = cars.find(c=>c.PlatNomor===t.PlatNomor);
-  const km0 = car ? Number(car.KMTerakhir)||0 : 0;
-  const body = `
-    <p style="margin-bottom:14px;color:var(--muted)">Mobil <b>${t.PlatNomor}</b> ke <b>${t.Tujuan}</b>.</p>
-    <div class="row">
-      <div class="field"><label>Jam Keluar</label><input id="f_jam" type="datetime-local" value="${nowLocal()}"></div>
-      <div class="field"><label>KM Keluar</label><input id="f_km" type="number" value="${km0}"><div class="hint">KM odometer saat ini.</div></div>
-    </div>`;
-  UI.modal({ title:'Catat Mobil Keluar', okLabel:'Konfirmasi Keluar', bodyHtml: body, onOk: async () => {
-    const patch = { Status:'Berjalan', JamKeluar:f_jam.value, KMKeluar:Number(f_km.value)||0 };
-    const r = await API.update('TRIPS','TripID',id,patch);
-    if (!r.ok) throw r.error;
+  if (status === 'Disetujui') {
+    // KM keluar sudah diisi pemohon -> mobil langsung berjalan & digunakan
+    const r = await API.update('TRIPS','TripID',id,{ Status:'Berjalan', ApprovedBy:user.name });
+    if (!r.ok) return UI.toast(r.error,'err');
     await API.update('CARS','PlatNomor',t.PlatNomor,{ Status:'Digunakan' });
-    UI.closeModal(); UI.toast('Mobil tercatat keluar.'); load();
-  }});
+    UI.toast('Disetujui — mobil tercatat keluar.');
+  } else {
+    const r = await API.update('TRIPS','TripID',id,{ Status:'Ditolak', ApprovedBy:user.name });
+    if (!r.ok) return UI.toast(r.error,'err');
+    UI.toast('Permohonan ditolak.');
+  }
+  load();
 }
 
 /* ---------- Check-in (gate masuk) ---------- */
 function checkIn(id) {
   const t = trips.find(x=>x.TripID===id);
   const body = `
-    <p style="margin-bottom:14px;color:var(--muted)">KM keluar tercatat: <b>${UI.num(t.KMKeluar)}</b></p>
+    <p style="margin-bottom:14px;color:var(--muted)">Mobil <b>${t.PlatNomor}</b> · tujuan <b>${t.Tujuan}</b><br>KM keluar tercatat: <b>${UI.num(t.KMKeluar)}</b></p>
     <div class="row">
       <div class="field"><label>Jam Kembali</label><input id="f_jam" type="datetime-local" value="${nowLocal()}"></div>
-      <div class="field"><label>KM Kembali</label><input id="f_km" type="number" value="${t.KMKeluar}" oninput="document.getElementById('selisih').textContent=Math.max(0,(this.value-${t.KMKeluar})).toLocaleString('id-ID')"></div>
+      <div class="field"><label>KM Kembali (odometer saat tiba)</label><input id="f_km" type="number" value="${t.KMKeluar}" oninput="document.getElementById('selisih').textContent=Math.max(0,(this.value-${t.KMKeluar})).toLocaleString('id-ID')"></div>
     </div>
-    <div class="rem warn"><span class="badge b-amber">Jarak Tempuh</span><b id="selisih">0</b> KM otomatis dihitung.</div>`;
-  UI.modal({ title:'Catat Mobil Kembali', okLabel:'Konfirmasi Kembali', bodyHtml: body, onOk: async () => {
+    <div class="rem warn"><span class="badge b-amber">Jarak Tempuh</span><b id="selisih">0</b> KM dihitung otomatis (KM kembali − KM keluar).</div>`;
+  UI.modal({ title:'Isi KM Kembali', okLabel:'Konfirmasi Kembali', bodyHtml: body, onOk: async () => {
     const kmIn = Number(f_km.value)||0;
     if (kmIn < Number(t.KMKeluar)) throw 'KM kembali tidak boleh lebih kecil dari KM keluar.';
     const selisih = kmIn - Number(t.KMKeluar);
