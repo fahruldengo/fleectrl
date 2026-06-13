@@ -37,6 +37,10 @@ const API = {
     return this.post('insert', { sheet, record, idField, idPrefix });
   },
 
+  insertBatch(sheet, records, idField, idPrefix) {
+    return this.post('insertBatch', { sheet, records, idField, idPrefix });
+  },
+
   update(sheet, idField, idValue, patch) {
     return this.post('update', { sheet, idField, idValue, patch });
   },
