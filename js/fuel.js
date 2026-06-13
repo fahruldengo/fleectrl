@@ -29,7 +29,9 @@ async function load() {
 
 function renderList(q) {
   q = (q||'').toLowerCase();
-  const rows = fuel.filter(f => [f.PlatNomor,f.LokasiSPBU].join(' ').toLowerCase().includes(q)).reverse();
+  // Driver hanya melihat klaim miliknya; Admin/GA/Manager melihat semua
+  let base = canValidate ? fuel : fuel.filter(f => f.DriverID === user.id);
+  const rows = base.filter(f => [f.PlatNomor,f.LokasiSPBU].join(' ').toLowerCase().includes(q)).reverse();
   document.getElementById('list').innerHTML = UI.table(rows, [
     { key:'Tanggal', label:'Tanggal', render:v=>UI.date(v) },
     { key:'PlatNomor', label:'Mobil', render:v=>`<b style="font-family:var(--mono)">${v}</b>` },
@@ -42,37 +44,69 @@ function renderList(q) {
         ${r.FotoStruk?`<img class="thumb" src="${r.FotoStruk}" onclick="window.open('${r.FotoStruk}')" title="Struk">`:''}
         ${r.FotoIndikator?`<img class="thumb" src="${r.FotoIndikator}" onclick="window.open('${r.FotoIndikator}')" title="Indikator">`:''}` },
     { key:'Status', label:'Status', render:v=>UI.statusBadge(v) },
-    { key:'_act', label:'', render:(_,r)=> (canValidate && r.Status==='Pending')?
-        `<button class="btn btn-primary btn-sm" onclick="validate('${r.FuelID}','Approved')">Setujui</button>
-         <button class="btn btn-danger btn-sm" onclick="validate('${r.FuelID}','Rejected')">Tolak</button>` : '' },
+    { key:'_act', label:'Aksi', render:(_,r)=> fuelActions(r) },
   ]);
 }
 
-function addFuel() {
-  fotoStruk=''; fotoInd='';
+function fuelActions(r) {
+  if (r.Status === 'Dibatalkan') return '<span style="color:var(--muted);font-size:12px">Dibatalkan</span>';
+  let b = '';
+  // Validasi (Approve/Reject) untuk Admin/GA/Manager saat Pending
+  if (canValidate && r.Status === 'Pending') {
+    b += `<button class="btn btn-primary btn-sm" onclick="validate('${r.FuelID}','Approved')">Setujui</button>
+          <button class="btn btn-danger btn-sm" onclick="validate('${r.FuelID}','Rejected')">Tolak</button>`;
+  }
+  // Edit: Admin/GA/Manager kapan saja; Driver hanya miliknya & masih Pending
+  const ownPending = (r.DriverID === user.id && r.Status === 'Pending');
+  if (canValidate || ownPending) {
+    b += `<button class="btn btn-ghost btn-sm" onclick="editFuel('${r.FuelID}')">Edit</button>`;
+  }
+  // Hapus (soft delete): hanya Admin/GA/Manager
+  if (canValidate) {
+    b += `<button class="btn btn-danger btn-sm" onclick="cancelFuel('${r.FuelID}')">Hapus</button>`;
+  }
+  return b || '<span style="color:var(--muted);font-size:12px">—</span>';
+}
+
+async function cancelFuel(id) {
+  const r = fuel.find(x=>x.FuelID===id);
+  UI.modal({ title:'Hapus Klaim BBM', okLabel:'Ya, Hapus', okClass:'btn-danger',
+    bodyHtml: `<p style="color:var(--ink-2)">Klaim BBM <b>${r.PlatNomor}</b> sebesar <b>${UI.rupiah(r.Biaya)}</b> akan ditandai <b>Dibatalkan</b>.</p>
+      <div class="rem warn" style="margin-top:12px"><span class="badge b-amber">Catatan</span>Data tetap tersimpan di Sheet untuk audit, hanya tidak dihitung lagi.</div>`,
+    onOk: async () => {
+      const res = await API.cancel('FUEL','FuelID',id,user.name);
+      if (!res.ok) throw res.error;
+      UI.closeModal(); UI.toast('Klaim ditandai dibatalkan.'); load();
+    }});
+}
+
+function addFuel(existing) {
+  const ed = existing || null;
+  fotoStruk = ed ? (ed.FotoStruk||'') : '';
+  fotoInd   = ed ? (ed.FotoIndikator||'') : '';
   const body = `
     <div class="row">
-      <div class="field"><label>Mobil</label><select id="f_plat" onchange="onCarChange()">${cars.map(c=>`<option>${c.PlatNomor}</option>`).join('')}</select></div>
-      <div class="field"><label>Jenis BBM</label><select id="f_bbm">${BBM.map(b=>`<option>${b}</option>`).join('')}</select></div>
+      <div class="field"><label>Mobil</label><select id="f_plat" onchange="onCarChange()">${cars.map(c=>`<option ${ed&&ed.PlatNomor===c.PlatNomor?'selected':''}>${c.PlatNomor}</option>`).join('')}</select></div>
+      <div class="field"><label>Jenis BBM</label><select id="f_bbm">${BBM.map(b=>`<option ${ed&&ed.JenisBBM===b?'selected':''}>${b}</option>`).join('')}</select></div>
     </div>
     <div class="row">
-      <div class="field"><label>Liter</label><input id="f_liter" type="number" step="0.01" oninput="calcEff()"></div>
-      <div class="field"><label>Biaya (Rp)</label><input id="f_biaya" type="number"></div>
+      <div class="field"><label>Liter</label><input id="f_liter" type="number" step="0.01" value="${ed?ed.Liter:''}" oninput="calcEff()"></div>
+      <div class="field"><label>Biaya (Rp)</label><input id="f_biaya" type="number" value="${ed?ed.Biaya:''}"></div>
     </div>
-    <div class="field"><label>Lokasi SPBU</label><input id="f_spbu" placeholder="SPBU 7x.xxx"></div>
+    <div class="field"><label>Lokasi SPBU</label><input id="f_spbu" value="${ed?(ed.LokasiSPBU||''):''}" placeholder="SPBU 7x.xxx"></div>
 
     <div style="border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px;background:#FAFBFD">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-        <input type="checkbox" id="f_auto" checked onchange="toggleAuto()" style="width:auto">
+        <input type="checkbox" id="f_auto" ${ed?'':'checked'} onchange="toggleAuto()" style="width:auto">
         <label for="f_auto" style="margin:0;cursor:pointer;font-size:12px;font-weight:600">Isi odometer terakhir otomatis (dari pengisian sebelumnya)</label>
       </div>
       <div class="row">
         <div class="field" style="margin:0"><label>Odometer Terakhir Isi</label>
-          <input id="f_odoLast" type="number" readonly oninput="calcEff()">
+          <input id="f_odoLast" type="number" value="${ed?(ed.OdoTerakhir||''):''}" ${ed?'':'readonly'} oninput="calcEff()">
           <div class="hint" id="hOdoLast">Otomatis dari data sebelumnya.</div>
         </div>
         <div class="field" style="margin:0"><label>Odometer Sekarang</label>
-          <input id="f_odoNow" type="number" oninput="calcEff()">
+          <input id="f_odoNow" type="number" value="${ed?(ed.OdoSekarang||''):''}" oninput="calcEff()">
           <div class="hint">Angka odometer mobil saat ini.</div>
         </div>
       </div>
@@ -80,10 +114,10 @@ function addFuel() {
 
     <div class="rem warn"><span class="badge b-amber">Jarak & Efisiensi</span><b id="effPreview">— km · — km/L</b></div>
     <div class="row" style="margin-top:6px">
-      <div class="field"><label>Foto Struk Bensin</label><input id="f_struk" type="file" accept="image/*" onchange="pick(this,'struk')"><div class="hint" id="hStruk">Wajib.</div></div>
-      <div class="field"><label>Foto Indikator/Odometer</label><input id="f_ind" type="file" accept="image/*" onchange="pick(this,'ind')"><div class="hint" id="hInd">Wajib.</div></div>
+      <div class="field"><label>Foto Struk Bensin</label><input id="f_struk" type="file" accept="image/*" onchange="pick(this,'struk')"><div class="hint" id="hStruk">${ed&&ed.FotoStruk?'<span style="color:var(--gauge)">✓ Sudah ada (unggah lagi untuk ganti)</span>':'Wajib.'}</div></div>
+      <div class="field"><label>Foto Indikator/Odometer</label><input id="f_ind" type="file" accept="image/*" onchange="pick(this,'ind')"><div class="hint" id="hInd">${ed&&ed.FotoIndikator?'<span style="color:var(--gauge)">✓ Sudah ada (unggah lagi untuk ganti)</span>':'Wajib.'}</div></div>
     </div>`;
-  UI.modal({ title:'Pengajuan Pengisian BBM', okLabel:'Kirim Klaim', bodyHtml: body, onOk: async () => {
+  UI.modal({ title: ed?'Edit Klaim BBM':'Pengajuan Pengisian BBM', okLabel: ed?'Simpan Perubahan':'Kirim Klaim', bodyHtml: body, onOk: async () => {
     const liter = Number(f_liter.value), biaya = Number(f_biaya.value);
     const odoLast = Number(f_odoLast.value)||0, odoNow = Number(f_odoNow.value)||0;
     if (!liter || !biaya) throw 'Liter dan biaya wajib diisi.';
@@ -92,18 +126,36 @@ function addFuel() {
     if (!fotoStruk || !fotoInd) throw 'Foto struk dan foto indikator wajib diunggah.';
     const km = (odoLast && odoNow) ? (odoNow - odoLast) : 0;
     const kmPerLiter = (km>0 && liter>0) ? +(km/liter).toFixed(2) : '';
-    const rec = {
-      PlatNomor:f_plat.value, DriverID:user.id, Tanggal:new Date().toISOString(), JenisBBM:f_bbm.value,
+    const data = {
+      PlatNomor:f_plat.value, JenisBBM:f_bbm.value,
       Liter:liter, Biaya:biaya, LokasiSPBU:f_spbu.value,
       OdoTerakhir:odoLast||'', OdoSekarang:odoNow, SelisihKM:km, KMPerLiter:kmPerLiter,
-      FotoStruk:fotoStruk, FotoIndikator:fotoInd, Status:'Pending', ApprovedBy:''
+      FotoStruk:fotoStruk, FotoIndikator:fotoInd
     };
-    const r = await API.insert('FUEL', rec, 'FuelID', 'FUEL');
-    if (!r.ok) throw r.error;
-    UI.closeModal(); UI.toast('Klaim BBM terkirim.'); load();
+    if (ed) {
+      const r = await API.update('FUEL','FuelID',ed.FuelID,data);
+      if (!r.ok) throw r.error;
+      UI.closeModal(); UI.toast('Perubahan klaim disimpan.'); load();
+    } else {
+      data.DriverID = user.id; data.Tanggal = new Date().toISOString();
+      data.Status = 'Pending'; data.ApprovedBy = '';
+      const r = await API.insert('FUEL', data, 'FuelID', 'FUEL');
+      if (!r.ok) throw r.error;
+      UI.closeModal(); UI.toast('Klaim BBM terkirim.'); load();
+    }
   }});
-  // isi otomatis untuk mobil pertama
-  setTimeout(onCarChange, 50);
+  // isi otomatis untuk mobil pertama (hanya saat tambah baru)
+  if (!ed) setTimeout(onCarChange, 50);
+  else setTimeout(calcEff, 50);
+}
+
+function editFuel(id) {
+  const r = fuel.find(x=>x.FuelID===id);
+  if (!r) return;
+  // penjaga peran: driver hanya boleh edit miliknya & Pending
+  const ownPending = (r.DriverID === user.id && r.Status === 'Pending');
+  if (!canValidate && !ownPending) return UI.toast('Klaim ini tidak bisa Anda edit.', 'err');
+  addFuel(r);
 }
 
 /** Cari odometer pengisian terakhir untuk sebuah mobil (OdoSekarang terbaru). */
