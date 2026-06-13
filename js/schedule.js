@@ -5,12 +5,13 @@
    ============================================================ */
 const user = Session.guard('schedule');
 const content = UI.shell('schedule', 'Jadwal & Penugasan Driver');
+const canManage = ['Admin','GA','Manager'].includes(user.role);
 let sched = [], drivers = [], cars = [];
 
 content.innerHTML = `
   <div class="toolbar">
     <div class="search"><input id="q" placeholder="Cari driver / plat…"></div>
-    <button class="btn btn-primary" onclick="addSched()">＋ Tambah Penugasan</button>
+    ${canManage ? '<button class="btn btn-primary" onclick="addSched()">＋ Tambah Penugasan</button>' : ''}
   </div>
   <div class="card" style="margin-bottom:16px">
     <h3>◷ Timeline 14 Hari ke Depan</h3>
@@ -65,6 +66,7 @@ function renderList(q) {
 }
 
 function addSched() {
+  if (!canManage) return UI.toast('Hanya Admin, GA, atau Manager yang dapat menambah penugasan.', 'err');
   const body = `
     <div class="field"><label>Driver</label><select id="f_driver">${drivers.filter(d=>d.Status!=='Nonaktif').map(d=>`<option value="${d.DriverID}|${d.Nama}">${d.Nama}</option>`).join('')}</select></div>
     <div class="field"><label>Mobil (opsional)</label><select id="f_plat"><option value="">—</option>${cars.map(c=>`<option>${c.PlatNomor}</option>`).join('')}</select></div>
