@@ -10,6 +10,8 @@
    - Karyawan/Driver: ajukan permohonan + isi KM keluar (saat ajukan) & KM kembali (saat tiba), lihat miliknya
    - Manager/GA/Admin: approve/reject. TIDAK mengisi KM kembali — yang tahu
      odometer saat mobil tiba hanyalah driver/pemohon di lapangan.
+   - Admin/GA: "Tutup Paksa" (darurat) untuk trip yang tersangkut (Berjalan &
+     lewat tanggal rencana). Wajib alasan; jejak dicatat di kolom Catatan.
    ============================================================ */
 const user = Session.guard('trips');
 const content = UI.shell('trips', 'Kontrol Mobil Keluar');
@@ -68,7 +70,22 @@ function actions(t) {
   if (t.Status === 'Berjalan' && isOwner) {
     b += `<button class="btn btn-primary btn-sm" onclick="checkIn('${t.TripID}')">◂ Isi KM Kembali</button>`;
   }
+  // Tutup paksa (darurat) — hanya Admin/GA, hanya untuk trip yang tersangkut:
+  // sudah Berjalan DAN melewati tanggal rencana. Mencegah mobil terkunci
+  // di status "Digunakan" bila driver lupa/tak bisa mengisi KM kembali.
+  const canForce = ['Admin','GA'].includes(user.role);
+  if (canForce && t.Status === 'Berjalan' && isOverdue(t)) {
+    b += `<button class="btn btn-danger btn-sm" onclick="forceClose('${t.TripID}')">⚠ Tutup Paksa</button>`;
+  }
   return b || '<span style="color:var(--muted);font-size:12px">—</span>';
+}
+
+/** Trip dianggap tersangkut bila tanggal rencananya sudah lewat dari hari ini. */
+function isOverdue(t) {
+  if (!t.TanggalRencana) return false;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const plan = new Date(t.TanggalRencana); plan.setHours(0,0,0,0);
+  return plan < today;
 }
 
 /* ---------- Permohonan ---------- */
@@ -152,6 +169,56 @@ function checkIn(id) {
     await API.update('CARS','PlatNomor',t.PlatNomor,{ KMTerakhir:kmIn, Status:'Tersedia' });
     await API.insert('KM_LOG', { PlatNomor:t.PlatNomor, TripID:id, KMKeluar:t.KMKeluar, KMKembali:kmIn, SelisihKM:selisih, Tanggal:new Date().toISOString() }, 'LogID', 'KM');
     UI.closeModal(); UI.toast(`Selesai. Jarak tempuh ${UI.num(selisih)} KM.`); load();
+  }});
+}
+
+/* ---------- Tutup paksa (darurat, Admin/GA) ---------- */
+function forceClose(id) {
+  const t = trips.find(x=>x.TripID===id);
+  const body = `
+    <div class="rem crit" style="margin-bottom:14px">
+      <span class="badge b-red">Darurat</span>
+      <div>Trip ini tersangkut: sudah berjalan tapi belum ditutup driver. Penutupan paksa akan mengembalikan mobil ke status <b>Tersedia</b>.</div>
+    </div>
+    <p style="margin-bottom:14px;color:var(--muted)">Mobil <b>${t.PlatNomor}</b> · driver <b>${t.NamaDriver||t.Pemohon}</b><br>KM keluar tercatat: <b>${UI.num(t.KMKeluar)}</b></p>
+    <div class="field">
+      <label>KM Kembali (opsional)</label>
+      <input id="f_km" type="number" placeholder="Kosongkan bila tidak diketahui" oninput="const s=document.getElementById('selisih');s.textContent=this.value?Math.max(0,(this.value-${t.KMKeluar})).toLocaleString('id-ID'):'—'">
+      <div class="hint">Isi hanya jika Anda mengetahui angka odometer (mis. dikonfirmasi driver via telepon). Bila dikosongkan, jarak tempuh tidak dihitung.</div>
+    </div>
+    <div class="rem warn"><span class="badge b-amber">Jarak Tempuh</span><b id="selisih">—</b> KM</div>
+    <div class="field"><label>Alasan penutupan paksa (wajib)</label><textarea id="f_alasan" rows="2" placeholder="cth: Driver lupa mengisi KM, sudah dikonfirmasi mobil kembali."></textarea></div>`;
+  UI.modal({ title:'Tutup Paksa Trip', okLabel:'Tutup Paksa', okClass:'btn-danger', bodyHtml: body, onOk: async () => {
+    const alasan = document.getElementById('f_alasan').value.trim();
+    if (!alasan) throw 'Alasan penutupan paksa wajib diisi.';
+    const kmRaw = document.getElementById('f_km').value;
+    const hasKm = kmRaw !== '' && Number(kmRaw) >= Number(t.KMKeluar);
+    if (kmRaw !== '' && Number(kmRaw) < Number(t.KMKeluar)) throw 'KM kembali tidak boleh lebih kecil dari KM keluar.';
+
+    const kmIn = hasKm ? Number(kmRaw) : '';
+    const selisih = hasKm ? (kmIn - Number(t.KMKeluar)) : '';
+    const jejak = `[DITUTUP PAKSA oleh ${user.name} (${user.role}) pada ${UI.date(new Date())}: ${alasan}]`;
+    const catatan = (t.Catatan ? t.Catatan + ' ' : '') + jejak;
+
+    const patch = {
+      Status:'Selesai', JamKembali:nowLocal(),
+      KMKembali:kmIn, SelisihKM:selisih, Catatan:catatan
+    };
+    const r = await API.update('TRIPS','TripID',id,patch);
+    if (!r.ok) throw r.error;
+
+    // mobil selalu dibebaskan; KM mobil hanya diperbarui bila KM kembali diketahui
+    const carPatch = { Status:'Tersedia' };
+    if (hasKm) carPatch.KMTerakhir = kmIn;
+    await API.update('CARS','PlatNomor',t.PlatNomor, carPatch);
+
+    // catat di KM_LOG hanya bila ada angka KM yang valid
+    if (hasKm) {
+      await API.insert('KM_LOG', { PlatNomor:t.PlatNomor, TripID:id, KMKeluar:t.KMKeluar, KMKembali:kmIn, SelisihKM:selisih, Tanggal:new Date().toISOString() }, 'LogID', 'KM');
+    }
+    UI.closeModal();
+    UI.toast('Trip ditutup paksa, mobil kembali tersedia.');
+    load();
   }});
 }
 
