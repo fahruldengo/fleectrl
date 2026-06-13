@@ -45,6 +45,10 @@ const API = {
     return this.post('update', { sheet, idField, idValue, patch });
   },
 
+  cancel(sheet, idField, idValue, by) {
+    return this.post('cancel', { sheet, idField, idValue, by });
+  },
+
   uploadPhoto(base64, filename, contentType) {
     return this.post('uploadPhoto', { base64, filename, contentType });
   },
