@@ -5,7 +5,7 @@
    ============================================================ */
 const user = Session.guard('maintenance');
 const content = UI.shell('maintenance', 'Servis Berkala & Riwayat KM');
-const canManage = ['Admin','GA','Manager'].includes(user.role);
+const canManage = ['Admin','GA','Manager','Driver'].includes(user.role);
 let maint = [], cars = [], kmlog = [];
 
 content.innerHTML = `
