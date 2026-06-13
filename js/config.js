@@ -3,7 +3,7 @@
    GANTI API_URL dengan URL deployment Apps Script (.../exec)
    ============================================================ */
 const CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/AKfycbzfcgSQF84-z160xpIw-V8gnGixIJ-12gRdpUR1usIEh1tkjdAeFmNwxwh2XiqWH6bP/exec',
+  API_URL: 'https://script.google.com/macros/s/GANTI_DEPLOYMENT_ID/exec',
   APP_NAME: 'FleetCtrl',
 };
 
@@ -22,7 +22,7 @@ const MENUS = [
   { group: 'Master Data', items: [
     { id: 'cars',       label: 'Data Mobil',       ic: '⛟', href: 'cars.html',       roles: ['Admin','GA'] },
     { id: 'drivers',    label: 'Data Driver',      ic: '☺', href: 'drivers.html',    roles: ['Admin','GA'] },
-    { id: 'maintenance',label: 'Servis & KM',      ic: '⚙', href: 'maintenance.html',roles: ['Admin','GA'] },
+    { id: 'maintenance',label: 'Servis & KM',      ic: '⚙', href: 'maintenance.html',roles: ['Admin','GA','Driver'] },
     { id: 'users',      label: 'Pengguna',         ic: '⚿', href: 'users.html',      roles: ['Admin'] },
   ]},
 ];
